@@ -1,0 +1,6 @@
+name = Bear Group Webform Prosperworks
+description = Connects contacts form to Prosperworks
+core = 7.x
+dependencies[] = webform
+dependencies[] = webform_ajax
+package = Bear Group
