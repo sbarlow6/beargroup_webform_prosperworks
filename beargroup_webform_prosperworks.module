@@ -1,0 +1,280 @@
+<?php
+
+function webform_curl_request($queryurl, $headers, $data) {
+$json_encoded_data = json_encode($data);
+
+$ch = curl_init();
+
+curl_setopt($ch, CURLOPT_URL,"$queryurl"); 
+curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
+curl_setopt($ch, CURLOPT_POST, 1); 
+curl_setopt($ch, CURLOPT_POSTFIELDS, $json_encoded_data);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
+curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+// send request
+$response = curl_exec ($ch);
+
+if (!$response) 
+{ 
+/*
+* Handle errors here
+* curl_error($ch) includes an error message
+*/
+echo 'CURL Error: ' . curl_error($ch);
+
+} else { 
+/*
+* Handle successful response here
+* Server returns a JSON representation of the created people
+*/
+return $response;
+
+}
+
+// close curl session
+curl_close ($ch);
+
+}
+
+function beargroup_webform_prosperworks_form_alter(&$form, $form_state, $form_id) {
+
+	if($form_id == "webform_configure_form") {
+
+		$webform_prosperworks = variable_get('webform_prosperworks', array());
+		$defaults = $webform_prosperworks[$form['#node']->nid];
+		$form['#submit'][] = 'beargroup_webform_prosperworks_webform_admin_submit';
+		$form['is_prosperworks'] = array(
+  			'#title' => 'Enable ProsperWorks',
+  			'#type' => 'checkbox',
+  			'#default_value' => !empty($defaults) ? $defaults['enabled'] : '',
+);
+		$form['prosperworks_pipeline'] = array(
+  			'#type' => 'select',
+  			'#title' => t('Which pipeline?'),
+  			'#default_value' => !empty($defaults) ? $defaults['pipeline'] : '',
+       '#options' => array(
+          0 => t('New Business'),
+         1 => t('Leads'),
+       ),
+);
+		$form['prosperworks_campaign'] = array(
+  			'#type' => 'textfield',
+  			'#title' => t('What Campaign Id?'),
+       		'#default_value' => !empty($defaults) ? $defaults['campaign'] : '',
+);
+
+	}
+}
+
+function beargroup_webform_prosperworks_webform_admin_submit($form, &$form_state) {
+
+	$webform_prosperworks = variable_get('webform_prosperworks', array());
+	$webform_prosperworks[$form['#node']->nid] = array(
+  'enabled' => $form_state['values']['is_prosperworks'],
+  'pipeline' => $form_state['values']['prosperworks_pipeline'],
+  'campaign' => $form_state['values']['prosperworks_campaign'],
+);
+variable_set('webform_prosperworks', $webform_prosperworks);
+}
+
+
+function beargroup_webform_prosperworks_webform_submission_insert($node, $submission) {
+
+$submitted = $_POST["submitted"];
+
+foreach($node->webform['components']AS $key => $field)
+    {
+    	$value = $submission->data[$key]['value'][0];
+
+switch($field['form_key']) {
+          case 'name':
+            $name = $value;
+            break;
+          case 'first_name':
+            $name = $value;
+            break;
+          case 'last_name':
+            $lastname = $value;
+            break;
+          case 'phone':
+            $phone = $value;
+            break;
+          case 'email':
+            $email = $value;
+            break;
+          case 'business_email':
+            $email = $value;
+            break;
+          case 'company':
+            $company = $value;
+            break;
+          case 'job_title':
+            $jobtitle = $value;
+            break;
+          case 'referred_by':
+            $description = $value;
+            break;
+          case 'message':
+          	$message = $value;
+          	break;
+        }
+
+}
+/* This needs to be changed to the id of whoever you want the items below to be assigned to in prosperworks */
+$assignee_id = 123456;
+
+/* This needs to be changed to the access token you can get from the settings in prosperworks */
+$user_access_token = "0000000000000000000000000000000000";
+/* This needs to be changed to the email that corresponds to the access token */
+$user_email = "user@whateversite.com";
+
+// define headers
+$headers = [ 
+"Content-Type: application/json",
+"X-PW-AccessToken:$user_access_token", 
+"X-PW-Application:developer_api",
+"X-PW-UserEmail:$user_email"
+];
+$date = date("m/d/Y");
+
+$name = $name . " " . $lastname;
+
+
+
+
+$webform_prosperworks = variable_get('webform_prosperworks', array());
+
+
+if (isset($webform_prosperworks[$node->nid])) {
+
+if($webform_prosperworks[$node->nid]['pipeline'] == 0) {
+/* This needs to be changed the the id of the pipeline you want the opportunity to go into. */
+	$pipeline_ident = 123456;
+
+
+
+
+
+
+$companydata = [
+"name" => "$company",
+"assignee_id" => $assignee_id,
+];
+$curldata = webform_curl_request("https://api.prosperworks.com/developer_api/v1/companies", $headers, $companydata);
+
+
+$postparse16 = json_decode($curldata);
+$company_id = $postparse16 ->id;
+
+$data = [
+"name" => "$name",
+"assignee_id" => $assignee_id,
+"company_id" => "$company_id",
+"contact_type_id" => "123456",/* This needs to be set to the id of the contact type you want the person to be saved as. */
+"emails" => [ 
+["email" => "$email", "category" => "work"]
+],
+"phone_numbers" => [
+[
+"number" => "$phone",
+"category" => "Work"
+],
+],
+"title" => "$jobtitle",
+
+/* This is how I set the custom fields for the person being added. These need to be changed to correspond to whatever custom fields you may have set.  */
+"custom_fields" => [
+ ["custom_field_definition_id" => "12345",
+ "value" => "$date"],
+ ["custom_field_definition_id" => "12345",
+ "value" => array(123456)],
+ ["custom_field_definition_id" => "12345",
+ "value" => "$description"]
+],
+];
+
+// echo "Curl Data:";
+$curldata = webform_curl_request("https://api.prosperworks.com/developer_api/v1/people", $headers, $data);
+
+$postparse15 = json_decode($curldata);
+
+$person_id = $postparse15 ->id;
+
+
+$opportunity = $company . " - REVIEW";
+// define data
+
+/* This just exists so we can tell what form the opportunity came from. The source needs to be set in prosperworks and set this number to the corresponding source id. */
+$sourceform = "123456";
+
+
+$opportunitydata = [
+"name" => "$opportunity",
+"assignee_id" => $assignee_id, 
+"primary_contact_id" => "$person_id",
+"details" => "$message",
+"pipeline_id" => "$pipeline_ident",
+"customer_source_id" => $sourceform,
+"custom_fields" => [
+ ["custom_field_definition_id" => "12345",
+ "value" => "$description"]
+],
+];
+
+// setup curl
+$curldata = webform_curl_request("https://api.prosperworks.com/developer_api/v1/opportunities", $headers, $opportunitydata);
+
+
+$task = $name . " needs to be added to Mail Chimp.";
+$taskdata = [
+	"name" => "$task",
+	"assignee_id" => $assignee_id,
+	"related_resource" => [
+		"type" => "person",
+		"id" => "$person_id"
+	],
+];
+
+$curldata = webform_curl_request("https://api.prosperworks.com/developer_api/v1/tasks", $headers, $taskdata);
+
+} else if($webform_prosperworks[$node->nid]['pipeline'] == 1) {
+	
+	$campaign_id = $webform_prosperworks[$node->nid]['campaign'];
+	$custom_fields = [["custom_field_definition_id" => "123456",
+		 	"value" => array(123456)]];
+
+	if(!empty($campaign_id)) {
+		$custom_fields[] = ["custom_field_definition_id" => "123456",
+		 	"value" => array($campaign_id)];
+	}
+	
+	$leaddetails = $message . $description;
+
+	$leaddata = [
+		"name" => "$name",
+		"assignee_id" => $assignee_id, 
+		"company_name" => "$company",
+		"details" => "$leaddetails",
+		"email" =>  ["email" => "$email", "category" => "work"],
+		"title" => "$jobtitle",
+		"phone_numbers" => [
+		[
+		"number" => "$phone",
+		"category" => "Work"
+		],
+		],
+		 "custom_fields" => $custom_fields,
+		"date_created" => "$date",
+		
+	];
+
+$curldata = webform_curl_request("https://api.prosperworks.com/developer_api/v1/leads", $headers, $leaddata);
+
+}
+}
+}
+
+ ?>
+
+
